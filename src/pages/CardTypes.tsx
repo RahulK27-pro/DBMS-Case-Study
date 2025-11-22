@@ -2,7 +2,17 @@ import { useState, useEffect } from "react";
 import { Search, Plus, Edit, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -26,25 +36,79 @@ export default function CardTypes() {
   const [cardTypes, setCardTypes] = useState<CardType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingCardType, setEditingCardType] = useState<CardType | null>(null);
+  const [formData, setFormData] = useState({
+    TypeName: "",
+    BaseFareMultiplier: "1.0",
+    Description: "",
+  });
+
+  const fetchCardTypes = async () => {
+    try {
+      setLoading(true);
+      const data = await api.getCardTypes();
+      setCardTypes(data);
+      setError(null);
+    } catch (err) {
+      console.error("Failed to fetch card types:", err);
+      setError("Failed to load card types. Please try again later.");
+      toast.error("Failed to load card types");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchCardTypes = async () => {
-      try {
-        setLoading(true);
-        const data = await api.getCardTypes();
-        setCardTypes(data);
-        setError(null);
-      } catch (err) {
-        console.error("Failed to fetch card types:", err);
-        setError("Failed to load card types. Please try again later.");
-        toast.error("Failed to load card types");
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchCardTypes();
   }, []);
+
+  const handleOpenDialog = (cardType?: CardType) => {
+    if (cardType) {
+      setEditingCardType(cardType);
+      setFormData({
+        TypeName: cardType.TypeName,
+        BaseFareMultiplier: cardType.BaseFareMultiplier.toString(),
+        Description: cardType.Description || "",
+      });
+    } else {
+      setEditingCardType(null);
+      setFormData({
+        TypeName: "",
+        BaseFareMultiplier: "1.0",
+        Description: "",
+      });
+    }
+    setIsDialogOpen(true);
+  };
+
+  const handleCloseDialog = () => {
+    setIsDialogOpen(false);
+    setEditingCardType(null);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const payload = {
+        TypeName: formData.TypeName,
+        BaseFareMultiplier: parseFloat(formData.BaseFareMultiplier),
+        Description: formData.Description,
+      };
+      if (editingCardType) {
+        await api.updateCardType(editingCardType.CardTypeID, payload);
+        toast.success("Card type updated successfully");
+      } else {
+        await api.createCardType(payload);
+        toast.success("Card type created successfully");
+      }
+      handleCloseDialog();
+      fetchCardTypes();
+    } catch (error: unknown) {
+      console.error("Error saving card type:", error);
+      toast.error("Failed to save card type");
+    }
+  };
 
   const filteredCardTypes = cardTypes.filter((ct) =>
     ct.TypeName.toLowerCase().includes(searchTerm.toLowerCase())
@@ -53,10 +117,9 @@ export default function CardTypes() {
   const handleDelete = async (cardTypeId: number) => {
     if (window.confirm('Are you sure you want to delete this card type?')) {
       try {
-        // TODO: Implement delete API call
-        // await api.deleteCardType(cardTypeId);
-        setCardTypes(cardTypes.filter(ct => ct.CardTypeID !== cardTypeId));
+        await api.deleteCardType(cardTypeId);
         toast.success('Card type deleted successfully');
+        fetchCardTypes();
       } catch (error) {
         console.error('Error deleting card type:', error);
         toast.error('Failed to delete card type');
@@ -73,7 +136,7 @@ export default function CardTypes() {
         </div>
         <Button 
           className="bg-gradient-accent shadow-glow"
-          onClick={() => toast.info("Add card type feature coming soon")}
+          onClick={() => handleOpenDialog()}
         >
           <Plus className="w-4 h-4 mr-2" />
           Add Card Type
@@ -143,7 +206,7 @@ export default function CardTypes() {
                           <Button 
                             variant="outline" 
                             size="sm"
-                            onClick={() => toast.info(`Edit ${cardType.TypeName} clicked`)}
+                            onClick={() => handleOpenDialog(cardType)}
                           >
                             <Edit className="w-4 h-4" />
                           </Button>
@@ -164,6 +227,58 @@ export default function CardTypes() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingCardType ? "Edit Card Type" : "Add New Card Type"}</DialogTitle>
+            <DialogDescription>
+              {editingCardType ? "Update card type information" : "Enter card type details"}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSubmit}>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="TypeName">Type Name *</Label>
+                <Input
+                  id="TypeName"
+                  value={formData.TypeName}
+                  onChange={(e) => setFormData({ ...formData, TypeName: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="BaseFareMultiplier">Base Fare Multiplier *</Label>
+                <Input
+                  id="BaseFareMultiplier"
+                  type="number"
+                  step="0.1"
+                  value={formData.BaseFareMultiplier}
+                  onChange={(e) => setFormData({ ...formData, BaseFareMultiplier: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="Description">Description</Label>
+                <Textarea
+                  id="Description"
+                  value={formData.Description}
+                  onChange={(e) => setFormData({ ...formData, Description: e.target.value })}
+                  rows={3}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={handleCloseDialog}>
+                Cancel
+              </Button>
+              <Button type="submit">
+                {editingCardType ? "Update" : "Create"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

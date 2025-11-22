@@ -2,8 +2,24 @@ import { useState, useEffect } from "react";
 import { Search, Plus, Edit, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -26,25 +42,73 @@ export default function Stations() {
   const [stations, setStations] = useState<Station[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingStation, setEditingStation] = useState<Station | null>(null);
+  const [formData, setFormData] = useState({
+    StationName: "",
+    LineColor: "",
+  });
+
+  const lineColors = ["Blue", "Red", "Green", "Yellow", "Purple", "Orange", "Pink", "Cyan"];
+
+  const fetchStations = async () => {
+    try {
+      setLoading(true);
+      const data = await api.getStations();
+      setStations(data);
+      setError(null);
+    } catch (err) {
+      console.error("Failed to fetch stations:", err);
+      setError("Failed to load stations. Please try again later.");
+      toast.error("Failed to load stations");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchStations = async () => {
-      try {
-        setLoading(true);
-        const data = await api.getStations();
-        setStations(data);
-        setError(null);
-      } catch (err) {
-        console.error("Failed to fetch stations:", err);
-        setError("Failed to load stations. Please try again later.");
-        toast.error("Failed to load stations");
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchStations();
   }, []);
+
+  const handleOpenDialog = (station?: Station) => {
+    if (station) {
+      setEditingStation(station);
+      setFormData({
+        StationName: station.StationName,
+        LineColor: station.LineColor || "",
+      });
+    } else {
+      setEditingStation(null);
+      setFormData({
+        StationName: "",
+        LineColor: "",
+      });
+    }
+    setIsDialogOpen(true);
+  };
+
+  const handleCloseDialog = () => {
+    setIsDialogOpen(false);
+    setEditingStation(null);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      if (editingStation) {
+        await api.updateStation(editingStation.StationID, formData);
+        toast.success("Station updated successfully");
+      } else {
+        await api.createStation(formData);
+        toast.success("Station created successfully");
+      }
+      handleCloseDialog();
+      fetchStations();
+    } catch (error: any) {
+      console.error("Error saving station:", error);
+      toast.error(error.message || "Failed to save station");
+    }
+  };
 
   const getLineColorClass = (color: string | null) => {
     if (!color) return "bg-gray-500";
@@ -69,10 +133,9 @@ export default function Stations() {
   const handleDelete = async (stationId: number) => {
     if (window.confirm('Are you sure you want to delete this station?')) {
       try {
-        // TODO: Implement delete API call
-        // await api.deleteStation(stationId);
-        setStations(stations.filter(station => station.StationID !== stationId));
+        await api.deleteStation(stationId);
         toast.success('Station deleted successfully');
+        fetchStations();
       } catch (error) {
         console.error('Error deleting station:', error);
         toast.error('Failed to delete station');
@@ -89,9 +152,10 @@ export default function Stations() {
         </div>
         <Button 
           className="bg-gradient-accent shadow-glow"
-          onClick={() => toast.info("Add station feature coming soon")}
+          onClick={() => handleOpenDialog()}
         >
           <Plus className="w-4 h-4 mr-2" />
+          Add Station
         </Button>
       </div>
 
@@ -162,7 +226,7 @@ export default function Stations() {
                           <Button 
                             variant="outline" 
                             size="sm"
-                            onClick={() => toast.info(`Edit ${station.StationName} clicked`)}
+                            onClick={() => handleOpenDialog(station)}
                           >
                             <Edit className="w-4 h-4" />
                           </Button>
@@ -183,6 +247,56 @@ export default function Stations() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingStation ? "Edit Station" : "Add New Station"}</DialogTitle>
+            <DialogDescription>
+              {editingStation ? "Update station information" : "Enter station details"}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSubmit}>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="StationName">Station Name *</Label>
+                <Input
+                  id="StationName"
+                  value={formData.StationName}
+                  onChange={(e) => setFormData({ ...formData, StationName: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="LineColor">Line Color</Label>
+                <Select value={formData.LineColor} onValueChange={(value) => setFormData({ ...formData, LineColor: value })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select line color" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {lineColors.map((color) => (
+                      <SelectItem key={color} value={color}>
+                        <div className="flex items-center gap-2">
+                          <span className={`w-3 h-3 rounded-full bg-${color.toLowerCase()}-500`}></span>
+                          {color}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={handleCloseDialog}>
+                Cancel
+              </Button>
+              <Button type="submit">
+                {editingStation ? "Update" : "Create"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

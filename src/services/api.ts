@@ -1,7 +1,14 @@
 // API service for connecting to Flask backend
-const API_BASE_URL = 'http://10.29.39.140:5000';
+const API_BASE_URL = 'http://localhost:5000';
 
 export const api = {
+  // Dashboard
+  getDashboardStats: async () => {
+    const response = await fetch(`${API_BASE_URL}/dashboard/stats`);
+    if (!response.ok) throw new Error('Failed to fetch dashboard stats');
+    return response.json();
+  },
+
   // Passengers
   getPassengers: async () => {
     const response = await fetch(`${API_BASE_URL}/passengers`);

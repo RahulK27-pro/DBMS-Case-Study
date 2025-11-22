@@ -2,8 +2,24 @@ import { useState, useEffect } from "react";
 import { Search, Plus, Edit, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -32,25 +48,56 @@ export default function Cards() {
   const [cards, setCards] = useState<CardType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingCard, setEditingCard] = useState<CardType | null>(null);
+  const [passengers, setPassengers] = useState<any[]>([]);
+  const [cardTypes, setCardTypes] = useState<any[]>([]);
+  const [formData, setFormData] = useState({
+    CardNumber: "",
+    Balance: "0",
+    PassengerID: "",
+    CardTypeID: "",
+    Status: "Active",
+  });
+
+  const fetchCards = async () => {
+    try {
+      setLoading(true);
+      const data = await api.getCards();
+      setCards(data);
+      setError(null);
+    } catch (err) {
+      console.error("Failed to fetch cards:", err);
+      setError("Failed to load cards. Please try again later.");
+      toast.error("Failed to load cards");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchCards = async () => {
-      try {
-        setLoading(true);
-        const data = await api.getCards();
-        setCards(data);
-        setError(null);
-      } catch (err) {
-        console.error("Failed to fetch cards:", err);
-        setError("Failed to load cards. Please try again later.");
-        toast.error("Failed to load cards");
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchCards();
+    fetchPassengers();
+    fetchCardTypes();
   }, []);
+
+  const fetchPassengers = async () => {
+    try {
+      const data = await api.getPassengers();
+      setPassengers(data);
+    } catch (err) {
+      console.error("Failed to fetch passengers:", err);
+    }
+  };
+
+  const fetchCardTypes = async () => {
+    try {
+      const data = await api.getCardTypes();
+      setCardTypes(data);
+    } catch (err) {
+      console.error("Failed to fetch card types:", err);
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -71,18 +118,89 @@ export default function Cards() {
       `${card.FirstName} ${card.LastName}`.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const handleOpenDialog = (card?: CardType) => {
+    if (card) {
+      setEditingCard(card);
+      setFormData({
+        CardNumber: card.CardNumber,
+        Balance: card.Balance.toString(),
+        PassengerID: "", // Read-only for edit
+        CardTypeID: "", // Read-only for edit
+        Status: card.Status,
+      });
+    } else {
+      setEditingCard(null);
+      setFormData({
+        CardNumber: "",
+        Balance: "0",
+        PassengerID: "",
+        CardTypeID: "",
+        Status: "Active",
+      });
+    }
+    setIsDialogOpen(true);
+  };
+
+  const handleCloseDialog = () => {
+    setIsDialogOpen(false);
+    setEditingCard(null);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Validation for create mode
+    if (!editingCard) {
+      if (!formData.CardNumber.trim()) {
+        toast.error("Card Number is required");
+        return;
+      }
+      if (!formData.PassengerID) {
+        toast.error("Please select a passenger");
+        return;
+      }
+      if (!formData.CardTypeID) {
+        toast.error("Please select a card type");
+        return;
+      }
+    }
+    
+    try {
+      if (editingCard) {
+        // Update only Balance and Status
+        await api.updateCard(editingCard.CardID, {
+          Balance: parseFloat(formData.Balance),
+          Status: formData.Status,
+        });
+        toast.success("Card updated successfully");
+      } else {
+        await api.createCard({
+          CardNumber: formData.CardNumber,
+          Balance: parseFloat(formData.Balance),
+          PassengerID: parseInt(formData.PassengerID),
+          CardTypeID: parseInt(formData.CardTypeID),
+          Status: formData.Status,
+        });
+        toast.success("Card created successfully");
+      }
+      handleCloseDialog();
+      fetchCards();
+    } catch (error: any) {
+      console.error("Error saving card:", error);
+      toast.error(error.message || "Failed to save card");
+    }
+  };
+
   const handleEdit = (card: CardType) => {
-    toast.info(`Edit card ${card.CardNumber} clicked`);
-    // TODO: Implement edit functionality
+    handleOpenDialog(card);
   };
 
   const handleDelete = async (cardId: number) => {
     if (window.confirm('Are you sure you want to delete this card?')) {
       try {
-        // TODO: Implement delete API call
-        // await api.deleteCard(cardId);
-        setCards(cards.filter(card => card.CardID !== cardId));
+        await api.deleteCard(cardId);
         toast.success('Card deleted successfully');
+        fetchCards();
       } catch (error) {
         console.error('Error deleting card:', error);
         toast.error('Failed to delete card');
@@ -99,7 +217,7 @@ export default function Cards() {
         </div>
         <Button 
           className="bg-gradient-accent shadow-glow"
-          onClick={() => toast.info("Feature coming soon")}
+          onClick={() => handleOpenDialog()}
         >
           <Plus className="w-4 h-4 mr-2" />
           Issue New Card
@@ -184,6 +302,113 @@ export default function Cards() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingCard ? "Edit Card" : "Issue New Card"}</DialogTitle>
+            <DialogDescription>
+              {editingCard ? "Update card balance and status" : "Enter card details to issue a new transport card"}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSubmit}>
+            <div className="space-y-4 py-4">
+              {editingCard ? (
+                // Edit mode: Show read-only fields and editable fields
+                <>
+                  <div className="space-y-2">
+                    <Label>Card Number</Label>
+                    <Input value={formData.CardNumber} disabled />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="Balance">Balance *</Label>
+                    <Input
+                      id="Balance"
+                      type="number"
+                      step="0.01"
+                      value={formData.Balance}
+                      onChange={(e) => setFormData({ ...formData, Balance: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="Status">Status *</Label>
+                    <Select value={formData.Status} onValueChange={(value) => setFormData({ ...formData, Status: value })}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Active">Active</SelectItem>
+                        <SelectItem value="Inactive">Inactive</SelectItem>
+                        <SelectItem value="Blocked">Blocked</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              ) : (
+                // Create mode: Show all fields
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="CardNumber">Card Number *</Label>
+                    <Input
+                      id="CardNumber"
+                      value={formData.CardNumber}
+                      onChange={(e) => setFormData({ ...formData, CardNumber: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="PassengerID">Passenger *</Label>
+                    <Select value={formData.PassengerID} onValueChange={(value) => setFormData({ ...formData, PassengerID: value })}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select passenger" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {passengers.map((p) => (
+                          <SelectItem key={p.PassengerID} value={p.PassengerID.toString()}>
+                            {p.FirstName} {p.LastName} ({p.Email})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="CardTypeID">Card Type *</Label>
+                    <Select value={formData.CardTypeID} onValueChange={(value) => setFormData({ ...formData, CardTypeID: value })}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select card type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {cardTypes.map((ct) => (
+                          <SelectItem key={ct.CardTypeID} value={ct.CardTypeID.toString()}>
+                            {ct.TypeName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="Balance">Initial Balance</Label>
+                    <Input
+                      id="Balance"
+                      type="number"
+                      step="0.01"
+                      value={formData.Balance}
+                      onChange={(e) => setFormData({ ...formData, Balance: e.target.value })}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={handleCloseDialog}>
+                Cancel
+              </Button>
+              <Button type="submit">{editingCard ? "Update" : "Create"}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

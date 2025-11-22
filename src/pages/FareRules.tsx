@@ -2,8 +2,24 @@ import { useState, useEffect } from "react";
 import { Search, Plus, Edit, Trash2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -30,25 +46,123 @@ export default function FareRules() {
   const [fareRules, setFareRules] = useState<FareRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingFareRule, setEditingFareRule] = useState<FareRule | null>(null);
+  const [stations, setStations] = useState<any[]>([]);
+  const [formData, setFormData] = useState({
+    StartStationID: "",
+    EndStationID: "",
+    FareType: "Regular",
+    FareAmount: "",
+  });
+
+  const fetchFareRules = async () => {
+    try {
+      setLoading(true);
+      const data = await api.getFareRules();
+      setFareRules(data);
+      setError(null);
+    } catch (err) {
+      console.error("Failed to fetch fare rules:", err);
+      setError("Failed to load fare rules. Please try again later.");
+      toast.error("Failed to load fare rules");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchStations = async () => {
+    try {
+      const data = await api.getStations();
+      setStations(data);
+    } catch (err) {
+      console.error("Failed to fetch stations:", err);
+    }
+  };
 
   useEffect(() => {
-    const fetchFareRules = async () => {
-      try {
-        setLoading(true);
-        const data = await api.getFareRules();
-        setFareRules(data);
-        setError(null);
-      } catch (err) {
-        console.error("Failed to fetch fare rules:", err);
-        setError("Failed to load fare rules. Please try again later.");
-        toast.error("Failed to load fare rules");
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchFareRules();
+    fetchStations();
   }, []);
+
+  const handleOpenDialog = (fareRule?: FareRule) => {
+    if (fareRule) {
+      setEditingFareRule(fareRule);
+      setFormData({
+        StartStationID: fareRule.StartStationID.toString(),
+        EndStationID: fareRule.EndStationID.toString(),
+        FareType: fareRule.FareType,
+        FareAmount: fareRule.FareAmount.toString(),
+      });
+    } else {
+      setEditingFareRule(null);
+      setFormData({
+        StartStationID: "",
+        EndStationID: "",
+        FareType: "Regular",
+        FareAmount: "",
+      });
+    }
+    setIsDialogOpen(true);
+  };
+
+  const handleCloseDialog = () => {
+    setIsDialogOpen(false);
+    setEditingFareRule(null);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Validation for create mode
+    if (!editingFareRule) {
+      if (!formData.StartStationID) {
+        toast.error("Please select a start station");
+        return;
+      }
+      if (!formData.EndStationID) {
+        toast.error("Please select an end station");
+        return;
+      }
+      if (formData.StartStationID === formData.EndStationID) {
+        toast.error("Start and end stations must be different");
+        return;
+      }
+    }
+    
+    if (!formData.FareType.trim()) {
+      toast.error("Fare Type is required");
+      return;
+    }
+    if (!formData.FareAmount || parseFloat(formData.FareAmount) <= 0) {
+      toast.error("Fare Amount must be greater than 0");
+      return;
+    }
+    
+    try {
+      if (editingFareRule) {
+        // Update only FareType and FareAmount (stations are immutable)
+        await api.updateFareRule(editingFareRule.FareRuleID, {
+          FareType: formData.FareType,
+          FareAmount: parseFloat(formData.FareAmount),
+        });
+        toast.success("Fare rule updated successfully");
+      } else {
+        await api.createFareRule({
+          StartStationID: parseInt(formData.StartStationID),
+          EndStationID: parseInt(formData.EndStationID),
+          FareType: formData.FareType,
+          FareAmount: parseFloat(formData.FareAmount),
+        });
+        toast.success("Fare rule created successfully");
+      }
+      handleCloseDialog();
+      fetchFareRules();
+    } catch (error: unknown) {
+      console.error("Error saving fare rule:", error);
+      toast.error("Failed to save fare rule");
+    }
+  };
 
   const handleDelete = async (id: number) => {
     if (window.confirm('Are you sure you want to delete this fare rule?')) {
@@ -102,7 +216,7 @@ export default function FareRules() {
         </div>
         <Button 
           className="bg-gradient-accent shadow-glow"
-          onClick={() => toast.info("Add fare rule functionality coming soon")}
+          onClick={() => handleOpenDialog()}
         >
           <Plus className="w-4 h-4 mr-2" />
           Add Fare Rule
@@ -158,7 +272,7 @@ export default function FareRules() {
                         <Button 
                           variant="outline" 
                           size="sm"
-                          onClick={() => toast.info("Edit functionality coming soon")}
+                          onClick={() => handleOpenDialog(rule)}
                         >
                           <Edit className="w-4 h-4" />
                         </Button>
@@ -178,6 +292,114 @@ export default function FareRules() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingFareRule ? "Edit Fare Rule" : "Add New Fare Rule"}</DialogTitle>
+            <DialogDescription>
+              {editingFareRule ? "Update fare pricing details" : "Define fare pricing between two stations"}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSubmit}>
+            <div className="space-y-4 py-4">
+              {editingFareRule ? (
+                // Edit mode: Show read-only station fields
+                <>
+                  <div className="space-y-2">
+                    <Label>Start Station</Label>
+                    <Input value={stations.find(s => s.StationID.toString() === formData.StartStationID)?.StationName || ""} disabled />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>End Station</Label>
+                    <Input value={stations.find(s => s.StationID.toString() === formData.EndStationID)?.StationName || ""} disabled />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="FareType">Fare Type *</Label>
+                    <Input
+                      id="FareType"
+                      value={formData.FareType}
+                      onChange={(e) => setFormData({ ...formData, FareType: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="FareAmount">Fare Amount (₹) *</Label>
+                    <Input
+                      id="FareAmount"
+                      type="number"
+                      step="0.01"
+                      value={formData.FareAmount}
+                      onChange={(e) => setFormData({ ...formData, FareAmount: e.target.value })}
+                      required
+                    />
+                  </div>
+                </>
+              ) : (
+                // Create mode: Show all fields
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="StartStationID">Start Station *</Label>
+                    <Select value={formData.StartStationID} onValueChange={(value) => setFormData({ ...formData, StartStationID: value })}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select start station" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {stations.map((s) => (
+                          <SelectItem key={s.StationID} value={s.StationID.toString()}>
+                            {s.StationName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="EndStationID">End Station *</Label>
+                    <Select value={formData.EndStationID} onValueChange={(value) => setFormData({ ...formData, EndStationID: value })}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select end station" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {stations.map((s) => (
+                          <SelectItem key={s.StationID} value={s.StationID.toString()}>
+                            {s.StationName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="FareType">Fare Type *</Label>
+                    <Input
+                      id="FareType"
+                      value={formData.FareType}
+                      onChange={(e) => setFormData({ ...formData, FareType: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="FareAmount">Fare Amount (₹) *</Label>
+                    <Input
+                      id="FareAmount"
+                      type="number"
+                      step="0.01"
+                      value={formData.FareAmount}
+                      onChange={(e) => setFormData({ ...formData, FareAmount: e.target.value })}
+                      required
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={handleCloseDialog}>
+                Cancel
+              </Button>
+              <Button type="submit">{editingFareRule ? "Update" : "Create"}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
